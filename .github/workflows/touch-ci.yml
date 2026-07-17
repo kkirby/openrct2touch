@@ -32,11 +32,15 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Pinned vcpkg baseline used by scripts/build-ios-deps.sh.
-  # Update this together with the 'builtin-baseline' in vcpkg.json and the
-  # VCPKG_COMMIT variable in scripts/build-ios-deps.sh whenever dependencies
-  # need to be upgraded.
+  # Pinned vcpkg baseline — must match:
+  #   - 'builtin-baseline' in vcpkg.json
+  #   - VCPKG_COMMIT in scripts/build-ios-deps.sh
+  # Update all three together whenever dependencies need to be upgraded.
   VCPKG_COMMIT: f87344cac03158cbf1467264565f1fd36b382a24
+  # Matches MACOS_DYLIBS_VERSION in CMakeLists.txt (currently 41).
+  # Bump this when that CMake variable is updated so the old archive is
+  # evicted from the cache and the new one is downloaded.
+  MACOS_DYLIBS_CACHE_KEY: macos-dylibs-v41
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -71,13 +75,12 @@ jobs:
 
       # Cache the downloaded macOS dylib archive (~25 MB) so repeated runs
       # skip the network fetch during cmake configure.
-      # The key suffix matches MACOS_DYLIBS_VERSION in CMakeLists.txt.
-      # Bump it (e.g., v42) whenever CMakeLists.txt updates that variable.
+      # See MACOS_DYLIBS_CACHE_KEY at the top of this file for upgrade notes.
       - name: Cache macOS dependency archive
         uses: actions/cache@v4
         with:
           path: lib/macos
-          key: macos-dylibs-v41
+          key: ${{ env.MACOS_DYLIBS_CACHE_KEY }}
 
       - name: Build macOS binary
         run: ./scripts/build-macos.sh
@@ -122,8 +125,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: lib/macos
-          # See the macOS job comment above for when to bump this key.
-          key: macos-dylibs-v41
+          # See MACOS_DYLIBS_CACHE_KEY at the top of this file for upgrade notes.
+          key: ${{ env.MACOS_DYLIBS_CACHE_KEY }}
 
       # vcpkg checkout is large; cache it by the pinned commit so the
       # repository clone is skipped on subsequent runs.
