@@ -32,7 +32,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Keep in sync with scripts/build-ios-deps.sh
+  # Pinned vcpkg baseline used by scripts/build-ios-deps.sh.
+  # Update this together with the 'builtin-baseline' in vcpkg.json and the
+  # VCPKG_COMMIT variable in scripts/build-ios-deps.sh whenever dependencies
+  # need to be upgraded.
   VCPKG_COMMIT: f87344cac03158cbf1467264565f1fd36b382a24
 
 jobs:
@@ -68,6 +71,8 @@ jobs:
 
       # Cache the downloaded macOS dylib archive (~25 MB) so repeated runs
       # skip the network fetch during cmake configure.
+      # The key suffix matches MACOS_DYLIBS_VERSION in CMakeLists.txt.
+      # Bump it (e.g., v42) whenever CMakeLists.txt updates that variable.
       - name: Cache macOS dependency archive
         uses: actions/cache@v4
         with:
@@ -117,6 +122,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: lib/macos
+          # See the macOS job comment above for when to bump this key.
           key: macos-dylibs-v41
 
       # vcpkg checkout is large; cache it by the pinned commit so the
@@ -129,31 +135,19 @@ jobs:
 
       # The installed package tree (arm64-ios-simulator) is keyed on the
       # vcpkg manifest and the overlay triplet file.  A cache hit lets us
-      # skip the 30–60 min cold dep build.
+      # skip the 30–60 min cold dep build; vcpkg install is idempotent and
+      # quickly validates already-installed packages on a warm cache.
       - name: Cache iOS Simulator vcpkg packages
-        id: ios-sim-deps-cache
         uses: actions/cache@v4
         with:
           path: vendor/ios-sim-arm64
           key: ios-sim-deps-${{ hashFiles('vcpkg.json', 'ios/vcpkg-triplets/openrct2-arm64-ios-simulator.cmake') }}
 
-      # Full dep build only when the package cache missed.
+      # build-ios-deps.sh handles its own vcpkg clone and bootstrap when the
+      # vcpkg cache misses, and vcpkg install quickly skips already-installed
+      # packages when the package cache hits.  No separate fallback is needed.
       - name: Build iOS Simulator dependencies
-        if: steps.ios-sim-deps-cache.outputs.cache-hit != 'true'
         run: ./scripts/build-ios-deps.sh sim
-
-      # When the package cache hits but the vcpkg cache missed (edge case),
-      # reconstruct the vcpkg binary so build-ios-libs.sh can find it.
-      - name: Ensure vcpkg binary
-        if: steps.ios-sim-deps-cache.outputs.cache-hit == 'true'
-        run: |
-          if [[ ! -x vendor/vcpkg/vcpkg ]]; then
-            if [[ ! -d vendor/vcpkg/.git ]]; then
-              git clone --filter=blob:none https://github.com/microsoft/vcpkg.git vendor/vcpkg
-              git -C vendor/vcpkg checkout --detach "$VCPKG_COMMIT"
-            fi
-            vendor/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-          fi
 
       # Run the macOS build to populate assets/engine (g2.dat, language/,
       # title sequences, objects, etc.) which the iOS bundle requires.
