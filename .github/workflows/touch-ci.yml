@@ -1,0 +1,170 @@
+name: OpenRCT2 Touch – CI
+
+# Runs on every push or PR against the ipad / touch/** branches.
+# The macOS compilation job verifies the desktop build is not broken by any
+# touch-specific change; it is fast (~10–15 min) and requires no proprietary
+# game data.
+#
+# The iOS Simulator build job is heavier (~40–60 min cold, ~10 min warm) and
+# only runs on direct pushes to ipad (not PRs) to keep costs low.  It builds
+# all vcpkg dependencies from source on the first run and caches them
+# thereafter.
+#
+# Jobs intentionally excluded from CI:
+#   - Headless smoke test  — requires proprietary RCT2 data (human gate)
+#   - Signed device build  — requires Apple Developer credentials (human gate)
+#   - TestFlight deploy    — requires proprietary distribution setup (human gate)
+
+on:
+  push:
+    branches:
+      - ipad
+      - 'touch/**'
+  pull_request:
+    branches:
+      - ipad
+
+permissions:
+  contents: read
+
+concurrency:
+  group: touch-ci-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # Pinned vcpkg baseline — must match:
+  #   - 'builtin-baseline' in vcpkg.json
+  #   - VCPKG_COMMIT in scripts/build-ios-deps.sh
+  # Update all three together whenever dependencies need to be upgraded.
+  VCPKG_COMMIT: f87344cac03158cbf1467264565f1fd36b382a24
+  # Matches MACOS_DYLIBS_VERSION in CMakeLists.txt (currently 41).
+  # Bump this when that CMake variable is updated so the old archive is
+  # evicted from the cache and the new one is downloaded.
+  MACOS_DYLIBS_CACHE_KEY: macos-dylibs-v41
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # macOS compilation
+  # ---------------------------------------------------------------------------
+  # Verifies that the desktop binary still compiles after every touch commit.
+  # Uses MACOS_USE_DEPENDENCIES=ON which downloads a pre-built dylib archive
+  # from github.com/OpenRCT2/Dependencies — no Homebrew formula required.
+  # ---------------------------------------------------------------------------
+  macos-build:
+    name: macOS compilation
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Disable upstream push
+        run: |
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url --push upstream DISABLED
+          fi
+
+      - name: Install build tools
+        run: |
+          to_install=()
+          command -v cmake      >/dev/null || to_install+=(cmake)
+          command -v ninja      >/dev/null || to_install+=(ninja)
+          command -v pkg-config >/dev/null || to_install+=(pkg-config)
+          [[ ${#to_install[@]} -eq 0 ]] || brew install "${to_install[@]}"
+
+      # Cache the downloaded macOS dylib archive (~25 MB) so repeated runs
+      # skip the network fetch during cmake configure.
+      # See MACOS_DYLIBS_CACHE_KEY at the top of this file for upgrade notes.
+      - name: Cache macOS dependency archive
+        uses: actions/cache@v4
+        with:
+          path: lib/macos
+          key: ${{ env.MACOS_DYLIBS_CACHE_KEY }}
+
+      - name: Build macOS binary
+        run: ./scripts/build-macos.sh
+
+  # ---------------------------------------------------------------------------
+  # iOS Simulator build
+  # ---------------------------------------------------------------------------
+  # Builds the Simulator slice end-to-end:
+  #   1. vcpkg dep build (SDL2, ICU4C, FreeType, zlib, …) — cached by
+  #      vcpkg.json + triplet hash, skipped on cache hit.
+  #   2. macOS build (generates redistributable engine assets).
+  #   3. iOS Simulator engine/UI static libraries (Ninja).
+  #   4. App bundle staging + verify-ios-bundle.sh audit.
+  #
+  # Runs only on direct pushes to ipad — PRs rely on the macOS check above.
+  # ---------------------------------------------------------------------------
+  ios-sim-build:
+    name: iOS Simulator build
+    runs-on: macos-15
+    if: github.event_name == 'push' && github.ref == 'refs/heads/ipad'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Disable upstream push
+        run: |
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url --push upstream DISABLED
+          fi
+
+      - name: Install build tools
+        run: |
+          to_install=()
+          command -v cmake      >/dev/null || to_install+=(cmake)
+          command -v ninja      >/dev/null || to_install+=(ninja)
+          command -v pkg-config >/dev/null || to_install+=(pkg-config)
+          [[ ${#to_install[@]} -eq 0 ]] || brew install "${to_install[@]}"
+
+      - name: Cache macOS dependency archive
+        uses: actions/cache@v4
+        with:
+          path: lib/macos
+          # See MACOS_DYLIBS_CACHE_KEY at the top of this file for upgrade notes.
+          key: ${{ env.MACOS_DYLIBS_CACHE_KEY }}
+
+      # vcpkg checkout is large; cache it by the pinned commit so the
+      # repository clone is skipped on subsequent runs.
+      - name: Cache vcpkg checkout and binary
+        uses: actions/cache@v4
+        with:
+          path: vendor/vcpkg
+          key: vcpkg-${{ env.VCPKG_COMMIT }}
+
+      # The installed package tree (arm64-ios-simulator) is keyed on the
+      # vcpkg manifest and the overlay triplet file.  A cache hit lets us
+      # skip the 30–60 min cold dep build; vcpkg install is idempotent and
+      # quickly validates already-installed packages on a warm cache.
+      - name: Cache iOS Simulator vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: vendor/ios-sim-arm64
+          key: ios-sim-deps-${{ hashFiles('vcpkg.json', 'ios/vcpkg-triplets/openrct2-arm64-ios-simulator.cmake') }}
+
+      # build-ios-deps.sh handles its own vcpkg clone and bootstrap when the
+      # vcpkg cache misses, and vcpkg install quickly skips already-installed
+      # packages when the package cache hits.  No separate fallback is needed.
+      - name: Build iOS Simulator dependencies
+        run: ./scripts/build-ios-deps.sh sim
+
+      # Run the macOS build to populate assets/engine (g2.dat, language/,
+      # title sequences, objects, etc.) which the iOS bundle requires.
+      - name: Build macOS binary and engine assets
+        run: ./scripts/build-macos.sh
+
+      # Compile arm64-ios-simulator static libraries.
+      - name: Build iOS Simulator engine/UI libraries
+        run: ./scripts/build-ios-libs.sh sim
+
+      # Stage the full app bundle and run the proprietary-data safety audit.
+      - name: Stage and audit iOS Simulator bundle
+        run: |
+          cmake --build build/ios-libs-ios-sim-arm64 --target openrct2-touch-stage
+          ./scripts/verify-ios-bundle.sh \
+            build/ios-libs-ios-sim-arm64/OpenRCT2Touch.app \
+            IOSSIMULATOR
