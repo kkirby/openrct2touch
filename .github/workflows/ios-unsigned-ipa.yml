@@ -61,6 +61,17 @@ jobs:
       - name: Build unsigned iPadOS app
         run: ./scripts/build-ios-device.sh unsigned
 
+      - name: Report bundle size and file count
+        run: |
+          APP="build/ios-xcode-device/Release-iphoneos/OpenRCT2Touch.app"
+          echo "== $APP =="
+          du -sh "$APP"
+          echo "regular files: $(find "$APP" -type f | wc -l)"
+          echo "-- largest subdirectories --"
+          du -sh "$APP"/*/ 2>/dev/null | sort -rh | head -20
+          echo "-- top-level entry count --"
+          find "$APP" -mindepth 1 -maxdepth 1 | wc -l
+
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
@@ -70,6 +81,8 @@ jobs:
           mkdir -p "$PAYLOAD_ROOT/Payload" artifacts
           cp -R "$APP" "$PAYLOAD_ROOT/Payload/"
           (cd "$PAYLOAD_ROOT" && zip -rqy "$GITHUB_WORKSPACE/artifacts/OpenRCT2Touch-unsigned.ipa" Payload)
+          ls -la artifacts/OpenRCT2Touch-unsigned.ipa
+          echo "files inside the IPA: $(unzip -l artifacts/OpenRCT2Touch-unsigned.ipa | tail -1)"
 
       - name: Upload unsigned IPA artifact
         uses: actions/upload-artifact@v6
