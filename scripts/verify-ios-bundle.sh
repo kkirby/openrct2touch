@@ -46,10 +46,12 @@ for dependency in sdl2 icu freetype libpng zlib zstd libzip nlohmann-json; do
     fi
 done
 
-if [[ "$(plutil -extract 'CFBundleIcons~ipad.CFBundlePrimaryIcon.CFBundleIconName' raw "$APP/Info.plist")" != "AppIcon" ]]; then
-    echo "App bundle does not declare the compiled AppIcon catalog." >&2
-    exit 1
-fi
+for icon_key in CFBundleIcons CFBundleIcons~ipad; do
+    if [[ "$(plutil -extract "$icon_key.CFBundlePrimaryIcon.CFBundleIconName" raw "$APP/Info.plist")" != "AppIcon" ]]; then
+        echo "App bundle does not declare the compiled AppIcon catalog ($icon_key)." >&2
+        exit 1
+    fi
+done
 
 for icon_spec in "AppIcon60x60@2x.png:120" "AppIcon76x76@2x~ipad.png:152"; do
     IFS=: read -r icon_name expected_size <<< "$icon_spec"

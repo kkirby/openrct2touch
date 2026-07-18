@@ -12,6 +12,14 @@
     <string>com.chrissotraidis.openrct2touch</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconName</key>
+            <string>AppIcon</string>
+        </dict>
+    </dict>
     <key>CFBundleIcons~ipad</key>
     <dict>
         <key>CFBundlePrimaryIcon</key>
@@ -36,10 +44,6 @@
     <string>15.0</string>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
-    <key>UIDeviceFamily</key>
-    <array>
-        <integer>2</integer>
-    </array>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIRequiredDeviceCapabilities</key>
@@ -52,6 +56,11 @@
     <true/>
     <key>UIStatusBarHidden</key>
     <true/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
     <key>UISupportedInterfaceOrientations~ipad</key>
     <array>
         <string>UIInterfaceOrientationLandscapeLeft</string>
